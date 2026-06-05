@@ -88,6 +88,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .hotel-name mark{background:rgba(201,168,76,0.25);color:inherit;border-radius:2px;padding:0 1px}
 .hotel-location{font-size:0.74rem;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hotel-tags{display:flex;gap:4px;flex-shrink:0}
+.get-price-link{display:inline-flex;align-items:center;gap:5px;font-size:0.75rem;font-weight:600;color:var(--sapphire);text-decoration:none;padding:5px 12px;border-radius:100px;border:1.5px solid rgba(59,130,246,0.3);background:rgba(59,130,246,0.06);white-space:nowrap;flex-shrink:0;transition:all 0.15s}
+.get-price-link:hover{background:var(--sapphire);color:#fff;border-color:var(--sapphire);transform:translateY(-1px);box-shadow:0 2px 8px rgba(30,64,175,0.25)}
+.get-price-link svg{width:13px;height:13px}
 .hotel-tag{font-size:0.62rem;padding:2px 8px;border-radius:100px;font-weight:500;letter-spacing:0.3px;text-transform:uppercase;white-space:nowrap}
 .hotel-tag.brand{background:rgba(30,64,175,0.08);color:var(--sapphire)}
 .hotel-tag.select{background:rgba(201,168,76,0.15);color:#8a6d1b}
@@ -129,6 +132,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   .results-section{padding:1rem 1rem 3rem}
   .hotel-item{padding:10px 12px}
   .hotel-tags{display:none}
+  .get-price-link{font-size:0.7rem;padding:4px 10px}
   .credit-card{grid-template-columns:1fr 1fr}
   .credit-info{padding:0 1rem}
   .filters-row{gap:0.4rem}
@@ -169,7 +173,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
         <span class="date-label">Check-out</span>
         <input type="date" class="date-input" id="checkoutDate" onchange="updateDates()" />
       </div>
-      <span class="date-hint" id="dateHint">Hotel links will include your dates</span>
+      <span class="date-hint" id="dateHint">Click any hotel → opens Google Travel with your dates & pricing</span>
     </div>
     <div class="filters-row" id="filtersRow">
       <select class="filter-select" id="regionSelect" onchange="applyFilters()"><option value="">All Regions</option></select>
@@ -399,21 +403,35 @@ function highlightText(text, query) {
 function makeSearchUrl(name, location) {
   const checkin = document.getElementById('checkinDate').value;
   const checkout = document.getElementById('checkoutDate').value;
-  let query = name;
+
   if (checkin && checkout) {
-    const ci = formatDateForSearch(checkin);
-    const co = formatDateForSearch(checkout);
-    query = name + ' book ' + ci + ' to ' + co;
-  } else if (checkin) {
-    query = name + ' book ' + formatDateForSearch(checkin);
+    // Google Travel ignores the ?dates= param — it reads dates from the &ts= protobuf.
+    // We reverse-engineered the encoding from a working Google Travel URL.
+    const ts = buildTsParam(checkin, checkout);
+    const q = encodeURIComponent(name);
+    return 'https://www.google.com/travel/hotels?q=' + q + '&ts=' + encodeURIComponent(ts);
   }
-  return 'https://www.google.com/search?q=' + encodeURIComponent(query);
+  // No dates — regular Google search
+  return 'https://www.google.com/search?q=' + encodeURIComponent(name + ' hotel official site');
 }
 
-function formatDateForSearch(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+// Encode a Google Travel &ts= protobuf with check-in/check-out dates
+function buildTsParam(ci, co) {
+  const [ciY,ciM,ciD] = ci.split('-').map(Number);
+  const [coY,coM,coD] = co.split('-').map(Number);
+
+  // Minimal protobuf encoder for this specific structure
+  function varint(v) { const b=[]; while(v>0x7f){b.push((v&0x7f)|0x80);v>>>=7;} b.push(v&0x7f); return b; }
+  function fv(n,v) { return [(n<<3)|0,...varint(v)]; }
+  function fl(n,d) { return [(n<<3)|2,...varint(d.length),...d]; }
+  function dt(y,m,d) { return [...fv(1,y),...fv(2,m),...fv(3,d)]; }
+
+  const datePair = [...fl(1,dt(ciY,ciM,ciD)),...fl(2,dt(coY,coM,coD))];
+  const datesGuests = [...fl(2,datePair),...fl(6,fv(1,2))];
+  const currency = fl(1,fl(7,[85,83,68])); // "USD"
+  const root = [...fv(1,0),...fl(3,fl(2,datesGuests)),...fl(5,currency)];
+
+  return btoa(String.fromCharCode(...new Uint8Array(root)));
 }
 
 function updateDates() {
@@ -474,7 +492,9 @@ function renderResults() {
     const delay = Math.min(i * 20, 400);
     const hasDates = document.getElementById('checkinDate').value && document.getElementById('checkoutDate').value;
     const titleText = hasDates ? 'Search for ' + h.name.replace(/"/g,'&quot;') + ' with your dates' : 'Search for ' + h.name.replace(/"/g,'&quot;');
-    return '<div class="hotel-item" style="animation-delay:' + delay + 'ms"><div class="hotel-info"><div class="hotel-name"><a href="' + url + '" target="_blank" rel="noopener" title="' + titleText + '">' + nameHtml + '</a></div><div class="hotel-location">' + locHtml + '</div></div><div class="hotel-tags">' + selectTag + brandTag + '</div></div>';
+    const priceIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
+    const getPriceLink = '<a href="' + url + '" target="_blank" rel="noopener" class="get-price-link" title="' + titleText + '">' + priceIcon + 'Get Price</a>';
+    return '<div class="hotel-item" style="animation-delay:' + delay + 'ms"><div class="hotel-info"><div class="hotel-name">' + nameHtml + '</div><div class="hotel-location">' + locHtml + '</div></div><div class="hotel-tags">' + selectTag + brandTag + '</div>' + getPriceLink + '</div>';
   }).join('');
 
   renderPagination(totalPages);
