@@ -40,6 +40,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .clear-btn.visible{display:flex}
 
 /* FILTERS */
+.dates-row{display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap}
+.date-group{display:flex;align-items:center;gap:6px}
+.date-label{font-size:0.74rem;font-weight:500;color:var(--text-muted);white-space:nowrap}
+.date-input{padding:6px 12px;border-radius:100px;border:1.5px solid var(--border);background:var(--bg-card);font-size:0.78rem;font-family:inherit;font-weight:500;color:var(--text-muted);cursor:pointer;transition:all 0.15s;outline:none}
+.date-input:hover,.date-input:focus{border-color:var(--sapphire-light);color:var(--text)}
+.date-input::-webkit-calendar-picker-indicator{cursor:pointer;opacity:0.5}
+.date-input.has-value{color:var(--sapphire);border-color:var(--sapphire-light);background-color:rgba(30,64,175,0.04)}
+.date-hint{font-size:0.68rem;color:var(--text-light);font-style:italic;display:none}
+.date-hint.visible{display:inline}
 .filters-row{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center}
 .filter-select{appearance:none;padding:6px 28px 6px 12px;border-radius:100px;border:1.5px solid var(--border);background:var(--bg-card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239ca3af'/%3E%3C/svg%3E") no-repeat right 10px center;font-size:0.78rem;font-family:inherit;font-weight:500;color:var(--text-muted);cursor:pointer;transition:all 0.15s;outline:none}
 .filter-select:hover,.filter-select:focus{border-color:var(--sapphire-light);color:var(--text)}
@@ -124,6 +133,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   .credit-info{padding:0 1rem}
   .filters-row{gap:0.4rem}
   .filter-select{font-size:0.72rem;padding:5px 24px 5px 10px}
+  .dates-row{gap:0.4rem}
+  .date-input{font-size:0.72rem;padding:5px 10px}
+  .date-label{font-size:0.68rem}
   .header .kbd-hint{display:none}
 }
 </style>
@@ -147,6 +159,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <button class="clear-btn" id="clearBtn" onclick="clearSearch()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
+    </div>
+    <div class="dates-row">
+      <div class="date-group">
+        <span class="date-label">Check-in</span>
+        <input type="date" class="date-input" id="checkinDate" onchange="updateDates()" />
+      </div>
+      <div class="date-group">
+        <span class="date-label">Check-out</span>
+        <input type="date" class="date-input" id="checkoutDate" onchange="updateDates()" />
+      </div>
+      <span class="date-hint" id="dateHint">Hotel links will include your dates</span>
     </div>
     <div class="filters-row" id="filtersRow">
       <select class="filter-select" id="regionSelect" onchange="applyFilters()"><option value="">All Regions</option></select>
@@ -286,6 +309,11 @@ function init() {
     document.getElementById('backToTop').classList.toggle('visible', window.scrollY > 400);
   }, { passive: true });
 
+  // Set min date on checkin to today
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('checkinDate').min = today;
+  document.getElementById('checkoutDate').min = today;
+
   applyFilters();
 }
 
@@ -310,6 +338,11 @@ function resetAll() {
   document.getElementById('countrySelect').value = '';
   document.getElementById('brandSelect').value = '';
   document.getElementById('sortSelect').value = 'az';
+  document.getElementById('checkinDate').value = '';
+  document.getElementById('checkoutDate').value = '';
+  document.getElementById('checkinDate').classList.remove('has-value');
+  document.getElementById('checkoutDate').classList.remove('has-value');
+  document.getElementById('dateHint').classList.remove('visible');
   selectFilter = false;
   document.getElementById('selectChip').classList.remove('active');
   currentPage = 1;
@@ -329,7 +362,7 @@ function applyFilters() {
     if (sel.id !== 'sortSelect') sel.classList.toggle('active', sel.value !== '');
   });
 
-  const hasFilters = query || region || state || country || brand || selectFilter;
+  const hasFilters = query || region || state || country || brand || selectFilter || document.getElementById('checkinDate').value || document.getElementById('checkoutDate').value;
   document.getElementById('resetBtn').style.display = hasFilters ? 'inline-flex' : 'none';
 
   filteredHotels = hotels.filter(h => {
@@ -363,8 +396,55 @@ function highlightText(text, query) {
   return result;
 }
 
-function makeSearchUrl(name) {
-  return 'https://www.google.com/search?q=' + encodeURIComponent(name + ' hotel official site');
+function makeSearchUrl(name, location) {
+  const checkin = document.getElementById('checkinDate').value;
+  const checkout = document.getElementById('checkoutDate').value;
+  let query = name;
+  if (checkin && checkout) {
+    const ci = formatDateForSearch(checkin);
+    const co = formatDateForSearch(checkout);
+    query = name + ' book ' + ci + ' to ' + co;
+  } else if (checkin) {
+    query = name + ' book ' + formatDateForSearch(checkin);
+  }
+  return 'https://www.google.com/search?q=' + encodeURIComponent(query);
+}
+
+function formatDateForSearch(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+}
+
+function updateDates() {
+  const checkin = document.getElementById('checkinDate');
+  const checkout = document.getElementById('checkoutDate');
+  const hint = document.getElementById('dateHint');
+
+  checkin.classList.toggle('has-value', !!checkin.value);
+  checkout.classList.toggle('has-value', !!checkout.value);
+
+  // Auto-set checkout min to checkin + 2 nights (Edit requires 2-night minimum)
+  if (checkin.value) {
+    const minCheckout = new Date(checkin.value + 'T00:00:00');
+    minCheckout.setDate(minCheckout.getDate() + 2);
+    checkout.min = minCheckout.toISOString().split('T')[0];
+    // If checkout is before the min, auto-adjust
+    if (checkout.value && checkout.value < checkout.min) {
+      checkout.value = checkout.min;
+      checkout.classList.add('has-value');
+    }
+    // If no checkout set yet, suggest checkin + 2
+    if (!checkout.value) {
+      checkout.value = checkout.min;
+      checkout.classList.add('has-value');
+    }
+  }
+
+  hint.classList.toggle('visible', !!(checkin.value || checkout.value));
+
+  // Re-render to update links
+  renderResults();
 }
 
 function renderResults() {
@@ -388,11 +468,13 @@ function renderResults() {
   list.innerHTML = pageHotels.map((h, i) => {
     const nameHtml = highlightText(h.name, query);
     const locHtml = highlightText(h.location, query);
-    const url = makeSearchUrl(h.name);
+    const url = makeSearchUrl(h.name, h.location);
     const brandTag = h.brand !== 'Independent' ? '<span class="hotel-tag brand">' + h.brand + '</span>' : '';
     const selectTag = h.isSelect ? '<span class="hotel-tag select">$250 Credit</span>' : '';
     const delay = Math.min(i * 20, 400);
-    return '<div class="hotel-item" style="animation-delay:' + delay + 'ms"><div class="hotel-info"><div class="hotel-name"><a href="' + url + '" target="_blank" rel="noopener" title="Search for ' + h.name.replace(/"/g,'&quot;') + '">' + nameHtml + '</a></div><div class="hotel-location">' + locHtml + '</div></div><div class="hotel-tags">' + selectTag + brandTag + '</div></div>';
+    const hasDates = document.getElementById('checkinDate').value && document.getElementById('checkoutDate').value;
+    const titleText = hasDates ? 'Search for ' + h.name.replace(/"/g,'&quot;') + ' with your dates' : 'Search for ' + h.name.replace(/"/g,'&quot;');
+    return '<div class="hotel-item" style="animation-delay:' + delay + 'ms"><div class="hotel-info"><div class="hotel-name"><a href="' + url + '" target="_blank" rel="noopener" title="' + titleText + '">' + nameHtml + '</a></div><div class="hotel-location">' + locHtml + '</div></div><div class="hotel-tags">' + selectTag + brandTag + '</div></div>';
   }).join('');
 
   renderPagination(totalPages);
